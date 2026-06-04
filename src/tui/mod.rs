@@ -125,27 +125,23 @@ fn short_clock() -> String {
 fn handle_diff_view(app: &mut App, key: KeyEvent) -> Result<()> {
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Up | KeyCode::Char('k') => {
-            if !app.diff_entries.is_empty() {
-                let i = app.diff_state.selected().unwrap_or(0);
-                let next = if i == 0 {
-                    app.diff_entries.len() - 1
-                } else {
-                    i - 1
-                };
-                app.diff_state.select(Some(next));
-            }
+        KeyCode::Up | KeyCode::Char('k') if !app.diff_entries.is_empty() => {
+            let i = app.diff_state.selected().unwrap_or(0);
+            let next = if i == 0 {
+                app.diff_entries.len() - 1
+            } else {
+                i - 1
+            };
+            app.diff_state.select(Some(next));
         }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if !app.diff_entries.is_empty() {
-                let i = app.diff_state.selected().unwrap_or(0);
-                let next = if i + 1 >= app.diff_entries.len() {
-                    0
-                } else {
-                    i + 1
-                };
-                app.diff_state.select(Some(next));
-            }
+        KeyCode::Down | KeyCode::Char('j') if !app.diff_entries.is_empty() => {
+            let i = app.diff_state.selected().unwrap_or(0);
+            let next = if i + 1 >= app.diff_entries.len() {
+                0
+            } else {
+                i + 1
+            };
+            app.diff_state.select(Some(next));
         }
         _ => {}
     }
@@ -289,27 +285,23 @@ fn handle_recipients(app: &mut App, key: KeyEvent) -> Result<()> {
 
     match key.code {
         KeyCode::Esc => app.mode = Mode::Normal,
-        KeyCode::Up | KeyCode::Char('k') => {
-            if !app.recipients.is_empty() {
-                let i = app.recipients_state.selected().unwrap_or(0);
-                let next = if i == 0 {
-                    app.recipients.len() - 1
-                } else {
-                    i - 1
-                };
-                app.recipients_state.select(Some(next));
-            }
+        KeyCode::Up | KeyCode::Char('k') if !app.recipients.is_empty() => {
+            let i = app.recipients_state.selected().unwrap_or(0);
+            let next = if i == 0 {
+                app.recipients.len() - 1
+            } else {
+                i - 1
+            };
+            app.recipients_state.select(Some(next));
         }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if !app.recipients.is_empty() {
-                let i = app.recipients_state.selected().unwrap_or(0);
-                let next = if i + 1 >= app.recipients.len() {
-                    0
-                } else {
-                    i + 1
-                };
-                app.recipients_state.select(Some(next));
-            }
+        KeyCode::Down | KeyCode::Char('j') if !app.recipients.is_empty() => {
+            let i = app.recipients_state.selected().unwrap_or(0);
+            let next = if i + 1 >= app.recipients.len() {
+                0
+            } else {
+                i + 1
+            };
+            app.recipients_state.select(Some(next));
         }
         KeyCode::Char('a') => {
             app.recipients_input_active = true;
