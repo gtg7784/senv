@@ -56,9 +56,13 @@ pub fn write(path: &Path, vault: &Vault) -> Result<()> {
     Ok(())
 }
 
-pub fn encrypt_value(plaintext: &str, recipient: &x25519::Recipient) -> Result<String> {
-    let recipients: Vec<&dyn age::Recipient> = vec![recipient];
-    let encryptor = age::Encryptor::with_recipients(recipients.into_iter())
+pub fn encrypt_value(plaintext: &str, recipients: &[x25519::Recipient]) -> Result<String> {
+    if recipients.is_empty() {
+        anyhow::bail!("at least one recipient required");
+    }
+    let refs: Vec<&dyn age::Recipient> =
+        recipients.iter().map(|r| r as &dyn age::Recipient).collect();
+    let encryptor = age::Encryptor::with_recipients(refs.into_iter())
         .map_err(|e| anyhow!("age encryptor: {e}"))?;
     let mut ciphertext = Vec::new();
     {
