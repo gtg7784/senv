@@ -502,6 +502,103 @@ fn short_pk(pk: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tui::SecretRow;
+    use tempfile::tempdir;
+
+    #[test]
+    fn import_env_file_basic_parse() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "FOO=bar\nBAZ=qux\n").unwrap();
+
+        let rows = import_env_file(&path).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].key, "BAZ");
+        assert_eq!(rows[1].key, "FOO");
+
+        let foo = rows.iter().find(|r| r.key == "FOO").unwrap();
+        let exposed: &str = foo.shared.as_ref().unwrap().expose_secret();
+        assert_eq!(exposed, "bar");
+    }
+
+    #[test]
+    fn import_env_file_handles_quotes_and_comments() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(
+            &path,
+            "# leading comment\nQUOTED=\"with spaces\"\nUNQUOTED=value\n",
+        )
+        .unwrap();
+
+        let rows = import_env_file(&path).unwrap();
+        assert_eq!(rows.len(), 2);
+        let quoted = rows.iter().find(|r| r.key == "QUOTED").unwrap();
+        let exposed: &str = quoted.shared.as_ref().unwrap().expose_secret();
+        assert_eq!(exposed, "with spaces");
+    }
+
+    #[test]
+    fn import_env_file_returns_err_when_missing() {
+        let result = import_env_file(Path::new("/nonexistent/path/.env"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mark_missing_adds_placeholder_rows() {
+        let dir = tempdir().unwrap();
+        let example_path = dir.path().join(".env.example");
+        std::fs::write(&example_path, "FOO=\nBAR=\nBAZ=\n").unwrap();
+
+        let mut rows = vec![SecretRow {
+            key: "FOO".into(),
+            shared: Some(SecretString::from("value".to_string())),
+            scoped: None,
+            missing_in_example: false,
+        }];
+
+        mark_missing_against_example(&mut rows, &example_path);
+        assert_eq!(rows.len(), 3);
+        let bar = rows.iter().find(|r| r.key == "BAR").unwrap();
+        assert!(bar.missing_in_example);
+        assert!(bar.shared.is_none());
+        let foo = rows.iter().find(|r| r.key == "FOO").unwrap();
+        assert!(!foo.missing_in_example);
+    }
+
+    #[test]
+    fn mark_missing_no_example_file_is_noop() {
+        let mut rows = vec![SecretRow {
+            key: "FOO".into(),
+            shared: Some(SecretString::from("v".to_string())),
+            scoped: None,
+            missing_in_example: false,
+        }];
+        mark_missing_against_example(
+            &mut rows,
+            Path::new("/nonexistent/path/.env.example"),
+        );
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn build_import_preview_reports_byte_lengths() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(".env");
+        std::fs::write(&path, "KEY1=value1\nKEY2=longer_value_2\n").unwrap();
+
+        let preview = build_import_preview(&path).unwrap();
+        assert_eq!(preview.entries.len(), 2);
+        let k1 = preview.entries.iter().find(|(k, _)| k == "KEY1").unwrap();
+        assert_eq!(k1.1, "value1".len());
+        let k2 = preview.entries.iter().find(|(k, _)| k == "KEY2").unwrap();
+        assert_eq!(k2.1, "longer_value_2".len());
+    }
+}
+
 pub fn commit_schema_edit(app: &mut App) -> Result<()> {
     let key_name = app
         .edit_key_name
