@@ -1,6 +1,6 @@
 mod app;
 
-pub use app::{App, Mode, UnlockState};
+pub use app::{App, Mode, SecretRow, UnlockState};
 
 use std::io;
 use std::time::Duration;
