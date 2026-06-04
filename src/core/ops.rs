@@ -202,12 +202,122 @@ pub fn reload_from_disk(app: &mut App) -> Result<()> {
     crate::core::discovery::populate(app)
 }
 
-pub fn commit_edit(_app: &mut App) -> Result<()> {
+pub fn commit_edit(app: &mut App) -> Result<()> {
+    let key_name = app
+        .edit_key_name
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no key being edited"))?;
+    let new_value = app.edit_buffer.lines().join("\n");
+
+    let mut found = false;
+    for row in app.rows.iter_mut() {
+        if row.key == key_name {
+            row.shared = Some(SecretString::from(new_value.clone()));
+            row.missing_in_example = false;
+            found = true;
+            break;
+        }
+    }
+    if !found {
+        anyhow::bail!("key '{}' no longer in rows", key_name);
+    }
+
+    save_app_rows_to_vault(app)?;
+    push_activity(app, format!("set {}", key_name));
     Ok(())
 }
 
-pub fn commit_new_secret(_app: &mut App) -> Result<()> {
+pub fn commit_new_secret(app: &mut App) -> Result<()> {
+    let raw = app.edit_buffer.lines().join("\n");
+    let trimmed = raw.trim();
+    let (key, value) = trimmed
+        .split_once('=')
+        .ok_or_else(|| anyhow::anyhow!("expected KEY=VALUE"))?;
+    let key = key.trim().to_string();
+    let value = value.trim().to_string();
+
+    if key.is_empty() {
+        anyhow::bail!("empty key");
+    }
+    if app.rows.iter().any(|r| r.key == key && r.shared.is_some()) {
+        anyhow::bail!("key '{}' already exists; use edit instead", key);
+    }
+
+    if let Some(row) = app.rows.iter_mut().find(|r| r.key == key) {
+        row.shared = Some(SecretString::from(value.clone()));
+        row.missing_in_example = false;
+    } else {
+        app.rows.push(SecretRow {
+            key: key.clone(),
+            shared: Some(SecretString::from(value.clone())),
+            scoped: None,
+            missing_in_example: false,
+        });
+        app.rows.sort_by(|a, b| a.key.cmp(&b.key));
+    }
+
+    save_app_rows_to_vault(app)?;
+    push_activity(app, format!("add {}", key));
     Ok(())
+}
+
+fn save_app_rows_to_vault(app: &App) -> Result<()> {
+    let vault_path = Path::new(VAULT_FILENAME);
+
+    let account = identity::DEFAULT_ACCOUNT;
+    if !identity::exists(account) {
+        anyhow::bail!("no identity in keyring; run `senv init` first");
+    }
+    let id = identity::load(account)?;
+    let recipient = id.to_public();
+
+    let mut vault = if vault_path.exists() {
+        vault_file::read(vault_path)?
+    } else {
+        Vault::new(recipient.to_string())
+    };
+
+    let mut new_secrets = std::collections::BTreeMap::new();
+    for row in &app.rows {
+        if let Some(secret) = &row.shared {
+            let exposed: &str = secret.expose_secret();
+            let ciphertext = vault_file::encrypt_value(exposed, &recipient)?;
+            let scoped = vault
+                .secrets
+                .get(&row.key)
+                .map(|e| e.scoped.clone())
+                .unwrap_or_default();
+            new_secrets.insert(
+                row.key.clone(),
+                EncryptedEntry {
+                    shared: ciphertext,
+                    scoped,
+                },
+            );
+        }
+    }
+    vault.secrets = new_secrets;
+    vault.mac = vault_file::compute_mac(&vault);
+    vault_file::write(vault_path, &vault)?;
+
+    Ok(())
+}
+
+fn push_activity(app: &mut App, msg: String) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let h = (secs / 3600) % 24;
+    let m = (secs / 60) % 60;
+    app.activity.push(crate::tui::ActivityLine {
+        time: format!("{:02}:{:02}", h, m),
+        message: msg,
+    });
+    if app.activity.len() > 100 {
+        app.activity.remove(0);
+    }
 }
 
 pub fn collect_env_pairs() -> Result<Vec<(String, String)>> {
