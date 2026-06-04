@@ -1,6 +1,6 @@
 mod app;
 
-pub use app::{App, Mode, SecretRow, UnlockState};
+pub use app::{ActivityLine, App, Mode, SecretRow, UnlockState};
 
 use std::io;
 use std::time::Duration;
@@ -71,10 +71,40 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.mode = Mode::Normal;
             }
         }
+        Mode::EditValue => handle_edit_value(app, key)?,
+        Mode::AddSecret => handle_add_secret(app, key)?,
         _ => {
             if key.code == KeyCode::Esc {
                 app.mode = Mode::Normal;
             }
+        }
+    }
+    Ok(())
+}
+
+fn handle_edit_value(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => reset_edit_buffer(app),
+        KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+            crate::core::ops::commit_edit(app)?;
+            reset_edit_buffer(app);
+        }
+        _ => {
+            app.edit_buffer.input(key);
+        }
+    }
+    Ok(())
+}
+
+fn handle_add_secret(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => reset_edit_buffer(app),
+        KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+            crate::core::ops::commit_new_secret(app)?;
+            reset_edit_buffer(app);
+        }
+        _ => {
+            app.edit_buffer.input(key);
         }
     }
     Ok(())
@@ -88,8 +118,8 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('t') => app.cycle_env_next(),
         KeyCode::Char('T') => app.cycle_env_prev(),
         KeyCode::Char(' ') => app.reveal = !app.reveal,
-        KeyCode::Char('e') => app.mode = Mode::EditValue,
-        KeyCode::Char('a') => app.mode = Mode::AddSecret,
+        KeyCode::Char('e') => enter_edit_value(app),
+        KeyCode::Char('a') => enter_add_secret(app),
         KeyCode::Char('d') => crate::core::ops::confirm_delete(app)?,
         KeyCode::Char('o') => crate::core::ops::toggle_scoped(app)?,
         KeyCode::Char('s') => app.mode = Mode::SchemaEdit,
@@ -103,4 +133,36 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+fn enter_edit_value(app: &mut App) {
+    let Some(idx) = app.row_state.selected() else {
+        return;
+    };
+    let Some(row) = app.rows.get(idx) else {
+        return;
+    };
+    let mut ta = tui_textarea::TextArea::default();
+    if let Some(secret) = &row.shared {
+        use secrecy::ExposeSecret;
+        let exposed: &str = secret.expose_secret();
+        ta.insert_str(exposed);
+    }
+    app.edit_buffer = ta;
+    app.edit_key_name = Some(row.key.clone());
+    app.mode = Mode::EditValue;
+}
+
+fn enter_add_secret(app: &mut App) {
+    let mut ta = tui_textarea::TextArea::default();
+    ta.set_placeholder_text("KEY=value");
+    app.edit_buffer = ta;
+    app.edit_key_name = None;
+    app.mode = Mode::AddSecret;
+}
+
+fn reset_edit_buffer(app: &mut App) {
+    app.edit_buffer = tui_textarea::TextArea::default();
+    app.edit_key_name = None;
+    app.mode = Mode::Normal;
 }
