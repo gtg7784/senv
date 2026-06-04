@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-14
+            archive_name: senv-aarch64-apple-darwin.tar.gz
+          - target: x86_64-apple-darwin
+            os: macos-13
+            archive_name: senv-x86_64-apple-darwin.tar.gz
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive_name: senv-x86_64-unknown-linux-gnu.tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Package archive
+        run: |
+          mkdir -p dist
+          cd target/${{ matrix.target }}/release
+          tar -czf "${{ github.workspace }}/dist/${{ matrix.archive_name }}" senv
+          cd "${{ github.workspace }}/dist"
+          shasum -a 256 "${{ matrix.archive_name }}" > "${{ matrix.archive_name }}.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive_name }}
+          path: |
+            dist/${{ matrix.archive_name }}
+            dist/${{ matrix.archive_name }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      arm64_sha: ${{ steps.shas.outputs.arm64 }}
+      x86_64_sha: ${{ steps.shas.outputs.x86_64 }}
+      linux_sha: ${{ steps.shas.outputs.linux }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Aggregate checksums
+        run: |
+          cd dist
+          ls -la
+          cat *.sha256 | tee SHA256SUMS
+
+      - name: Extract SHAs and version
+        id: shas
+        run: |
+          ARM64=$(awk '/aarch64-apple-darwin.tar.gz/ {print $1; exit}' dist/SHA256SUMS)
+          X86_64=$(awk '/x86_64-apple-darwin.tar.gz/ {print $1; exit}' dist/SHA256SUMS)
+          LINUX=$(awk '/x86_64-unknown-linux-gnu.tar.gz/ {print $1; exit}' dist/SHA256SUMS)
+          echo "arm64=$ARM64"   >> "$GITHUB_OUTPUT"
+          echo "x86_64=$X86_64" >> "$GITHUB_OUTPUT"
+          echo "linux=$LINUX"   >> "$GITHUB_OUTPUT"
+
+      - name: Extract version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: senv ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
+
+  bump-homebrew:
+    name: Bump Homebrew formula
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ vars.HOMEBREW_TAP_REPO != '' }}
+    steps:
+      - name: Check out tap repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.HOMEBREW_TAP_REPO }}
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render Formula/senv.rb
+        run: |
+          mkdir -p tap/Formula
+          cat > tap/Formula/senv.rb <<EOF
+          class Senv < Formula
+            desc "Encrypted .env replacement with first-class TUI"
+            homepage "https://github.com/${{ github.repository }}"
+            version "${{ needs.release.outputs.version }}"
+            license "MIT OR Apache-2.0"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/senv-aarch64-apple-darwin.tar.gz"
+                sha256 "${{ needs.release.outputs.arm64_sha }}"
+              else
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/senv-x86_64-apple-darwin.tar.gz"
+                sha256 "${{ needs.release.outputs.x86_64_sha }}"
+              end
+            end
+
+            on_linux do
+              url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/senv-x86_64-unknown-linux-gnu.tar.gz"
+              sha256 "${{ needs.release.outputs.linux_sha }}"
+            end
+
+            def install
+              bin.install "senv"
+            end
+
+            test do
+              assert_match "senv ${{ needs.release.outputs.version }}", shell_output("#{bin}/senv --version")
+            end
+          end
+          EOF
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/senv.rb
+          git diff --cached --quiet && exit 0
+          git commit -m "senv ${{ needs.release.outputs.version }}"
+          git push
