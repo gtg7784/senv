@@ -1,10 +1,13 @@
+use std::path::Path;
 use std::sync::OnceLock;
 
 use age::secrecy::ExposeSecret;
 use age::x25519;
 use anyhow::{anyhow, Context, Result};
+use secrecy::SecretString;
 
-use crate::tui::{App, UnlockState};
+use crate::storage::{vault_file, VAULT_FILENAME};
+use crate::tui::{App, SecretRow, UnlockState};
 
 pub const KEYRING_SERVICE: &str = "senv";
 pub const DEFAULT_ACCOUNT: &str = "default-identity";
@@ -89,13 +92,46 @@ pub fn delete(account: &str) -> Result<()> {
 }
 
 pub fn lock(app: &mut App) -> Result<()> {
+    app.rows.clear();
     app.unlock = UnlockState::Locked;
     Ok(())
 }
 
 pub fn unlock(app: &mut App) -> Result<()> {
-    let _identity = load(DEFAULT_ACCOUNT)
+    let identity = load(DEFAULT_ACCOUNT)
         .context("no identity in keyring (run `senv init` first)")?;
+
+    let vault_path = Path::new(VAULT_FILENAME);
+    if vault_path.exists() {
+        let vault = vault_file::read(vault_path)?;
+        if !vault_file::verify_mac(&vault) {
+            anyhow::bail!("vault integrity check failed (BLAKE3 MAC mismatch)");
+        }
+
+        let mut rows = Vec::with_capacity(vault.secrets.len());
+        for (key, entry) in &vault.secrets {
+            if entry.shared.is_empty() {
+                rows.push(SecretRow {
+                    key: key.clone(),
+                    shared: None,
+                    scoped: None,
+                    missing_in_example: false,
+                });
+                continue;
+            }
+            let plaintext = vault_file::decrypt_value(&entry.shared, &identity)
+                .with_context(|| format!("decrypt {}", key))?;
+            rows.push(SecretRow {
+                key: key.clone(),
+                shared: Some(SecretString::from(plaintext)),
+                scoped: None,
+                missing_in_example: false,
+            });
+        }
+        crate::core::ops::mark_missing_against_example(&mut rows, Path::new(".env.example"));
+        app.rows = rows;
+    }
+
     app.unlock = UnlockState::Unlocked;
     Ok(())
 }
