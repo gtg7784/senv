@@ -13,10 +13,11 @@ pub fn populate(app: &mut App) -> Result<()> {
 
     let vault_path = Path::new(crate::storage::VAULT_FILENAME);
     let identity_account = crate::crypto::identity::DEFAULT_ACCOUNT;
-    if vault_path.exists() && crate::crypto::identity::exists(identity_account) {
-        if crate::crypto::identity::unlock(app).is_ok() {
-            return Ok(());
-        }
+    if vault_path.exists()
+        && crate::crypto::identity::exists(identity_account)
+        && crate::crypto::identity::unlock(app).is_ok()
+    {
+        return Ok(());
     }
 
     if let Ok(rows) = crate::core::ops::import_env_file(Path::new(".env")) {
