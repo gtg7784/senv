@@ -150,6 +150,41 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
+pub fn compute_diff(app: &mut App) -> Vec<crate::tui::DiffEntry> {
+    use crate::tui::{DiffEntry, DiffKind};
+
+    let example_path = Path::new(".env.example");
+    if !example_path.exists() {
+        push_activity(app, "no .env.example in cwd".to_string());
+        return Vec::new();
+    }
+    let Ok(content) = fs::read_to_string(example_path) else {
+        push_activity(app, "cannot read .env.example".to_string());
+        return Vec::new();
+    };
+    let example_keys: HashSet<String> = dotenvy::from_read_iter(content.as_bytes())
+        .filter_map(|r| r.ok().map(|(k, _)| k))
+        .collect();
+    let current_keys: HashSet<String> = app.rows.iter().map(|r| r.key.clone()).collect();
+
+    let mut all: Vec<String> = example_keys.union(&current_keys).cloned().collect();
+    all.sort();
+
+    all.into_iter()
+        .map(|key| {
+            let kind = match (
+                example_keys.contains(&key),
+                current_keys.contains(&key),
+            ) {
+                (true, false) => DiffKind::Missing,
+                (false, true) => DiffKind::Extra,
+                _ => DiffKind::Match,
+            };
+            DiffEntry { key, kind }
+        })
+        .collect()
+}
+
 pub fn diff() -> Result<()> {
     let env_path = Path::new(".env");
     let example_path = Path::new(".env.example");
