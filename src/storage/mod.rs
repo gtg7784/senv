@@ -47,3 +47,60 @@ fn now_unix_seconds() -> String {
         .map(|d| d.as_secs().to_string())
         .unwrap_or_else(|_| "0".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vault_new_initializes_correctly() {
+        let v = Vault::new("age1xyz".to_string());
+        assert_eq!(v.version, VAULT_VERSION);
+        assert_eq!(v.recipients, vec!["age1xyz".to_string()]);
+        assert!(v.secrets.is_empty());
+        assert!(v.schema.is_empty());
+        assert!(v.mac.is_empty());
+    }
+
+    #[test]
+    fn vault_serde_full_roundtrip() {
+        let mut vault = Vault::new("age1abc".to_string());
+        vault.secrets.insert(
+            "FOO".into(),
+            EncryptedEntry {
+                shared: "ct".into(),
+                scoped: Default::default(),
+            },
+        );
+        vault
+            .schema
+            .insert("FOO".into(), "the foo key".into());
+        vault.mac = "blake3-v1:deadbeef".into();
+
+        let json = serde_json::to_string(&vault).unwrap();
+        let loaded: Vault = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(vault.version, loaded.version);
+        assert_eq!(vault.recipients, loaded.recipients);
+        assert_eq!(vault.secrets["FOO"].shared, loaded.secrets["FOO"].shared);
+        assert_eq!(vault.schema, loaded.schema);
+        assert_eq!(vault.mac, loaded.mac);
+    }
+
+    #[test]
+    fn vault_serde_backward_compat_no_schema() {
+        let json = r#"{"version":"1.0","created":"0","recipients":["age1abc"],"secrets":{},"mac":""}"#;
+        let vault: Vault = serde_json::from_str(json).unwrap();
+        assert_eq!(vault.recipients, vec!["age1abc".to_string()]);
+        assert!(vault.schema.is_empty());
+        assert!(vault.secrets.is_empty());
+    }
+
+    #[test]
+    fn encrypted_entry_serde_optional_scoped() {
+        let json = r#"{"shared":"ct"}"#;
+        let entry: EncryptedEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.shared, "ct");
+        assert!(entry.scoped.is_empty());
+    }
+}
