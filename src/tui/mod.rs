@@ -1,6 +1,8 @@
 mod app;
 
-pub use app::{ActivityLine, App, DiffEntry, DiffKind, Mode, SecretRow, UnlockState};
+pub use app::{
+    ActivityLine, App, DiffEntry, DiffKind, ImportPreview, Mode, SecretRow, UnlockState,
+};
 
 use std::io;
 use std::time::Duration;
@@ -74,6 +76,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Mode::EditValue => handle_edit_value(app, key)?,
         Mode::AddSecret => handle_add_secret(app, key)?,
         Mode::DiffView => handle_diff_view(app, key)?,
+        Mode::ImportWizard => handle_import_wizard(app, key)?,
         _ => {
             if key.code == KeyCode::Esc {
                 app.mode = Mode::Normal;
@@ -81,6 +84,41 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn handle_import_wizard(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => {
+            app.import_preview = None;
+            app.mode = Mode::Normal;
+        }
+        KeyCode::Enter => {
+            if let Some(preview) = app.import_preview.clone() {
+                let count = crate::core::ops::import_silent(&preview.source)?;
+                crate::core::ops::reload_from_disk(app)?;
+                let msg = format!("imported {} entries from {}", count, preview.source.display());
+                app.activity.push(crate::tui::ActivityLine {
+                    time: short_clock(),
+                    message: msg,
+                });
+            }
+            app.import_preview = None;
+            app.mode = Mode::Normal;
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn short_clock() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let h = (secs / 3600) % 24;
+    let m = (secs / 60) % 60;
+    format!("{:02}:{:02}", h, m)
 }
 
 fn handle_diff_view(app: &mut App, key: KeyEvent) -> Result<()> {
@@ -155,7 +193,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('o') => crate::core::ops::toggle_scoped(app)?,
         KeyCode::Char('s') => app.mode = Mode::SchemaEdit,
         KeyCode::Char('r') => app.mode = Mode::Recipients,
-        KeyCode::Char('i') => app.mode = Mode::ImportWizard,
+        KeyCode::Char('i') => enter_import_wizard(app),
         KeyCode::Char('D') => enter_diff_view(app),
         KeyCode::Char('R') => crate::core::ops::reload_from_disk(app)?,
         KeyCode::Char('L') => crate::crypto::identity::lock(app)?,
@@ -205,4 +243,14 @@ fn enter_diff_view(app: &mut App) {
         app.diff_state.select(Some(0));
     }
     app.mode = Mode::DiffView;
+}
+
+fn enter_import_wizard(app: &mut App) {
+    let path = std::path::Path::new(".env");
+    app.import_preview = if path.exists() {
+        crate::core::ops::build_import_preview(path).ok()
+    } else {
+        None
+    };
+    app.mode = Mode::ImportWizard;
 }

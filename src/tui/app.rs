@@ -38,6 +38,12 @@ pub struct DiffEntry {
     pub kind: DiffKind,
 }
 
+#[derive(Clone)]
+pub struct ImportPreview {
+    pub source: std::path::PathBuf,
+    pub entries: Vec<(String, usize)>,
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Mode {
     Normal,
@@ -81,6 +87,8 @@ pub struct App {
     pub diff_entries: Vec<DiffEntry>,
     pub diff_state: ListState,
 
+    pub import_preview: Option<ImportPreview>,
+
     pub should_quit: bool,
 }
 
@@ -111,6 +119,7 @@ impl App {
             edit_key_name: None,
             diff_entries: Vec::new(),
             diff_state: ListState::default(),
+            import_preview: None,
             should_quit: false,
         }
     }
@@ -186,6 +195,7 @@ impl App {
         match self.mode {
             Mode::Help => self.render_help_overlay(f),
             Mode::DiffView => self.render_diff_overlay(f),
+            Mode::ImportWizard => self.render_import_overlay(f),
             Mode::Normal => {}
             _ => self.render_placeholder_modal(f),
         }
@@ -411,6 +421,41 @@ impl App {
             inner,
             &mut self.diff_state,
         );
+    }
+
+    fn render_import_overlay(&self, f: &mut Frame) {
+        let area = centered_rect(70, 60, f.area());
+        f.render_widget(Clear, area);
+        let title = " Import .env wizard ";
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let Some(preview) = &self.import_preview else {
+            f.render_widget(
+                Paragraph::new(
+                    "\n  No .env found in cwd.\n\n  Place a .env in the project root and re-open this wizard.\n  Press Esc to return.",
+                ),
+                inner,
+            );
+            return;
+        };
+
+        let chunks = Layout::vertical([Constraint::Length(3), Constraint::Min(1)]).split(inner);
+
+        let header = format!(
+            "  Source:  {}\n  Will encrypt {} entries into .env.age\n",
+            preview.source.display(),
+            preview.entries.len()
+        );
+        f.render_widget(Paragraph::new(header), chunks[0]);
+
+        let items: Vec<ListItem> = preview
+            .entries
+            .iter()
+            .map(|(k, len)| ListItem::new(format!("  🔒 {}  ({} bytes)", k, len)))
+            .collect();
+        f.render_widget(List::new(items), chunks[1]);
     }
 
     fn render_help_overlay(&self, f: &mut Frame) {
