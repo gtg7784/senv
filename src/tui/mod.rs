@@ -77,6 +77,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Mode::AddSecret => handle_add_secret(app, key)?,
         Mode::DiffView => handle_diff_view(app, key)?,
         Mode::ImportWizard => handle_import_wizard(app, key)?,
+        Mode::SchemaEdit => handle_schema_edit(app, key)?,
         _ => {
             if key.code == KeyCode::Esc {
                 app.mode = Mode::Normal;
@@ -191,7 +192,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('a') => enter_add_secret(app),
         KeyCode::Char('d') => crate::core::ops::confirm_delete(app)?,
         KeyCode::Char('o') => crate::core::ops::toggle_scoped(app)?,
-        KeyCode::Char('s') => app.mode = Mode::SchemaEdit,
+        KeyCode::Char('s') => enter_schema_edit(app),
         KeyCode::Char('r') => app.mode = Mode::Recipients,
         KeyCode::Char('i') => enter_import_wizard(app),
         KeyCode::Char('D') => enter_diff_view(app),
@@ -253,4 +254,35 @@ fn enter_import_wizard(app: &mut App) {
         None
     };
     app.mode = Mode::ImportWizard;
+}
+
+fn enter_schema_edit(app: &mut App) {
+    let Some(idx) = app.row_state.selected() else {
+        return;
+    };
+    let Some(row) = app.rows.get(idx) else {
+        return;
+    };
+    let mut ta = tui_textarea::TextArea::default();
+    if let Some(desc) = app.schema.get(&row.key) {
+        ta.insert_str(desc);
+    }
+    ta.set_placeholder_text("schema description (Shift+Enter for newline)");
+    app.edit_buffer = ta;
+    app.edit_key_name = Some(row.key.clone());
+    app.mode = Mode::SchemaEdit;
+}
+
+fn handle_schema_edit(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => reset_edit_buffer(app),
+        KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+            crate::core::ops::commit_schema_edit(app)?;
+            reset_edit_buffer(app);
+        }
+        _ => {
+            app.edit_buffer.input(key);
+        }
+    }
+    Ok(())
 }

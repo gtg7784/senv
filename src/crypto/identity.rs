@@ -130,6 +130,7 @@ pub fn unlock(app: &mut App) -> Result<()> {
         }
         crate::core::ops::mark_missing_against_example(&mut rows, Path::new(".env.example"));
         app.rows = rows;
+        app.schema = vault.schema.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     }
 
     app.unlock = UnlockState::Unlocked;

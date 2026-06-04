@@ -358,9 +358,32 @@ fn save_app_rows_to_vault(app: &App) -> Result<()> {
         }
     }
     vault.secrets = new_secrets;
+    vault.schema = app
+        .schema
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     vault.mac = vault_file::compute_mac(&vault);
     vault_file::write(vault_path, &vault)?;
 
+    Ok(())
+}
+
+pub fn commit_schema_edit(app: &mut App) -> Result<()> {
+    let key_name = app
+        .edit_key_name
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no key being edited"))?;
+    let new_desc = app.edit_buffer.lines().join("\n").trim().to_string();
+
+    if new_desc.is_empty() {
+        app.schema.remove(&key_name);
+    } else {
+        app.schema.insert(key_name.clone(), new_desc);
+    }
+
+    save_app_rows_to_vault(app)?;
+    push_activity(app, format!("schema {}", key_name));
     Ok(())
 }
 

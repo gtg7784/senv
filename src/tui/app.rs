@@ -89,6 +89,8 @@ pub struct App {
 
     pub import_preview: Option<ImportPreview>,
 
+    pub schema: std::collections::HashMap<String, String>,
+
     pub should_quit: bool,
 }
 
@@ -120,6 +122,7 @@ impl App {
             diff_entries: Vec::new(),
             diff_state: ListState::default(),
             import_preview: None,
+            schema: std::collections::HashMap::new(),
             should_quit: false,
         }
     }
@@ -477,7 +480,10 @@ impl App {
                 None => " Edit value ".to_string(),
             },
             Mode::AddSecret => " Add secret · KEY=VALUE ".to_string(),
-            Mode::SchemaEdit => " Edit schema ".to_string(),
+            Mode::SchemaEdit => match &self.edit_key_name {
+                Some(k) => format!(" Schema · {} ", k),
+                None => " Edit schema ".to_string(),
+            },
             Mode::Recipients => " Recipients ".to_string(),
             Mode::ImportWizard => " Import .env wizard ".to_string(),
             Mode::DiffView => " Diff vs .env.example ".to_string(),
@@ -488,7 +494,7 @@ impl App {
         f.render_widget(block, area);
 
         match self.mode {
-            Mode::EditValue | Mode::AddSecret => {
+            Mode::EditValue | Mode::AddSecret | Mode::SchemaEdit => {
                 f.render_widget(&self.edit_buffer, inner);
             }
             _ => {
