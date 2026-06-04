@@ -3,8 +3,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use age::x25519;
-use anyhow::{anyhow, Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use anyhow::{Context, Result, anyhow};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use tempfile::NamedTempFile;
 
 use crate::storage::Vault;
@@ -16,10 +16,9 @@ pub fn read(path: &Path) -> Result<Vault> {
             path.display()
         );
     }
-    let content =
-        fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
-    let vault: Vault = serde_json::from_str(&content)
-        .with_context(|| format!("parse {}", path.display()))?;
+    let content = fs::read_to_string(path).with_context(|| format!("read {}", path.display()))?;
+    let vault: Vault =
+        serde_json::from_str(&content).with_context(|| format!("parse {}", path.display()))?;
     Ok(vault)
 }
 
@@ -31,7 +30,10 @@ pub fn write(path: &Path, vault: &Vault) -> Result<()> {
         );
     }
     let json = serde_json::to_string_pretty(vault).context("serialize vault")?;
-    let dir = path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or_else(|| Path::new("."));
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(dir).ok();
     let mut tmp = NamedTempFile::new_in(dir)?;
 
@@ -45,7 +47,8 @@ pub fn write(path: &Path, vault: &Vault) -> Result<()> {
     tmp.write_all(json.as_bytes())?;
     tmp.write_all(b"\n")?;
     tmp.as_file().sync_all()?;
-    tmp.persist(path).map_err(|e| anyhow!("persist temp file: {e}"))?;
+    tmp.persist(path)
+        .map_err(|e| anyhow!("persist temp file: {e}"))?;
 
     #[cfg(unix)]
     {
@@ -60,8 +63,10 @@ pub fn encrypt_value(plaintext: &str, recipients: &[x25519::Recipient]) -> Resul
     if recipients.is_empty() {
         anyhow::bail!("at least one recipient required");
     }
-    let refs: Vec<&dyn age::Recipient> =
-        recipients.iter().map(|r| r as &dyn age::Recipient).collect();
+    let refs: Vec<&dyn age::Recipient> = recipients
+        .iter()
+        .map(|r| r as &dyn age::Recipient)
+        .collect();
     let encryptor = age::Encryptor::with_recipients(refs.into_iter())
         .map_err(|e| anyhow!("age encryptor: {e}"))?;
     let mut ciphertext = Vec::new();
@@ -79,8 +84,8 @@ pub fn decrypt_value(b64: &str, identity: &x25519::Identity) -> Result<String> {
     let ciphertext = BASE64
         .decode(b64)
         .map_err(|e| anyhow!("base64 decode: {e}"))?;
-    let decryptor = age::Decryptor::new(&ciphertext[..])
-        .map_err(|e| anyhow!("age decryptor: {e}"))?;
+    let decryptor =
+        age::Decryptor::new(&ciphertext[..]).map_err(|e| anyhow!("age decryptor: {e}"))?;
     let identities: Vec<&dyn age::Identity> = vec![identity];
     let mut reader = decryptor
         .decrypt(identities.into_iter())
@@ -200,9 +205,7 @@ mod tests {
         let mut vault = Vault::new("age1abc".to_string());
         vault.secrets.insert("KEY1".into(), make_entry("ct"));
         vault.mac = compute_mac(&vault);
-        vault
-            .secrets
-            .insert("KEY1".into(), make_entry("tampered"));
+        vault.secrets.insert("KEY1".into(), make_entry("tampered"));
         assert!(!verify_mac(&vault));
     }
 

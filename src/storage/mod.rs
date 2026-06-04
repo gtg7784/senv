@@ -72,9 +72,7 @@ mod tests {
                 scoped: Default::default(),
             },
         );
-        vault
-            .schema
-            .insert("FOO".into(), "the foo key".into());
+        vault.schema.insert("FOO".into(), "the foo key".into());
         vault.mac = "blake3-v1:deadbeef".into();
 
         let json = serde_json::to_string(&vault).unwrap();
@@ -89,7 +87,8 @@ mod tests {
 
     #[test]
     fn vault_serde_backward_compat_no_schema() {
-        let json = r#"{"version":"1.0","created":"0","recipients":["age1abc"],"secrets":{},"mac":""}"#;
+        let json =
+            r#"{"version":"1.0","created":"0","recipients":["age1abc"],"secrets":{},"mac":""}"#;
         let vault: Vault = serde_json::from_str(json).unwrap();
         assert_eq!(vault.recipients, vec!["age1abc".to_string()]);
         assert!(vault.schema.is_empty());

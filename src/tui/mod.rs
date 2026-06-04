@@ -14,7 +14,7 @@ use crossterm::{
         KeyModifiers,
     },
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 
@@ -93,7 +93,11 @@ fn handle_import_wizard(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(preview) = app.import_preview.clone() {
                 let count = crate::core::ops::import_silent(&preview.source)?;
                 crate::core::ops::reload_from_disk(app)?;
-                let msg = format!("imported {} entries from {}", count, preview.source.display());
+                let msg = format!(
+                    "imported {} entries from {}",
+                    count,
+                    preview.source.display()
+                );
                 app.activity.push(crate::tui::ActivityLine {
                     time: short_clock(),
                     message: msg,
@@ -288,14 +292,22 @@ fn handle_recipients(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Up | KeyCode::Char('k') => {
             if !app.recipients.is_empty() {
                 let i = app.recipients_state.selected().unwrap_or(0);
-                let next = if i == 0 { app.recipients.len() - 1 } else { i - 1 };
+                let next = if i == 0 {
+                    app.recipients.len() - 1
+                } else {
+                    i - 1
+                };
                 app.recipients_state.select(Some(next));
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if !app.recipients.is_empty() {
                 let i = app.recipients_state.selected().unwrap_or(0);
-                let next = if i + 1 >= app.recipients.len() { 0 } else { i + 1 };
+                let next = if i + 1 >= app.recipients.len() {
+                    0
+                } else {
+                    i + 1
+                };
                 app.recipients_state.select(Some(next));
             }
         }

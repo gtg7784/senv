@@ -3,10 +3,10 @@ use std::sync::OnceLock;
 
 use age::secrecy::ExposeSecret;
 use age::x25519;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use secrecy::SecretString;
 
-use crate::storage::{vault_file, VAULT_FILENAME};
+use crate::storage::{VAULT_FILENAME, vault_file};
 use crate::tui::{App, SecretRow, UnlockState};
 
 pub const KEYRING_SERVICE: &str = "senv";
@@ -47,8 +47,7 @@ fn ensure_default_store() -> Result<()> {
 
 fn entry(account: &str) -> Result<keyring_core::Entry> {
     ensure_default_store()?;
-    keyring_core::Entry::new(KEYRING_SERVICE, account)
-        .context("create keyring entry")
+    keyring_core::Entry::new(KEYRING_SERVICE, account).context("create keyring entry")
 }
 
 pub fn exists(account: &str) -> bool {
@@ -98,8 +97,8 @@ pub fn lock(app: &mut App) -> Result<()> {
 }
 
 pub fn unlock(app: &mut App) -> Result<()> {
-    let identity = load(DEFAULT_ACCOUNT)
-        .context("no identity in keyring (run `senv init` first)")?;
+    let identity =
+        load(DEFAULT_ACCOUNT).context("no identity in keyring (run `senv init` first)")?;
 
     let vault_path = Path::new(VAULT_FILENAME);
     if vault_path.exists() {

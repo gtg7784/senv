@@ -191,9 +191,8 @@ impl App {
         self.render_env_tabs(f, body[0]);
         self.render_secret_table(f, body[1]);
 
-        let sidebar =
-            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
-                .split(body[2]);
+        let sidebar = Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(body[2]);
         self.render_recipients(f, sidebar[0]);
         self.render_activity(f, sidebar[1]);
 
@@ -211,9 +210,7 @@ impl App {
 
     fn render_header(&self, f: &mut Frame, area: Rect) {
         let lock_span = match self.unlock {
-            UnlockState::Locked => {
-                Span::styled("🔒 locked", Style::new().fg(Color::Red).bold())
-            }
+            UnlockState::Locked => Span::styled("🔒 locked", Style::new().fg(Color::Red).bold()),
             UnlockState::Unlocked => {
                 Span::styled("🔓 unlocked", Style::new().fg(Color::Green).bold())
             }
@@ -293,7 +290,12 @@ impl App {
                 } else {
                     Cell::from("")
                 };
-                Row::new(vec![Cell::from(row.key.clone()), value_cell, source, status])
+                Row::new(vec![
+                    Cell::from(row.key.clone()),
+                    value_cell,
+                    source,
+                    status,
+                ])
             })
             .collect();
 
@@ -316,9 +318,7 @@ impl App {
             let table = Table::new(rows, widths)
                 .header(header)
                 .block(Block::default().borders(Borders::ALL).title(title))
-                .row_highlight_style(
-                    Style::new().bg(Color::Cyan).fg(Color::Black).bold(),
-                )
+                .row_highlight_style(Style::new().bg(Color::Cyan).fg(Color::Black).bold())
                 .highlight_symbol("▶ ")
                 .highlight_spacing(HighlightSpacing::Always);
             f.render_stateful_widget(table, area, &mut self.row_state);
@@ -338,8 +338,7 @@ impl App {
             .collect();
 
         f.render_stateful_widget(
-            List::new(items)
-                .block(Block::default().borders(Borders::ALL).title("Recipients")),
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Recipients")),
             area,
             &mut self.recipients_state,
         );
@@ -361,11 +360,15 @@ impl App {
 
     fn render_keymap_hint(&self, f: &mut Frame, area: Rect) {
         let hint = match self.mode {
-            Mode::Normal => " [↑↓/jk] nav  [space] reveal  [e] edit  [a] add  [t] env  [s] schema  [r] recipients  [i] import  [?] help  [q] quit ",
+            Mode::Normal => {
+                " [↑↓/jk] nav  [space] reveal  [e] edit  [a] add  [t] env  [s] schema  [r] recipients  [i] import  [?] help  [q] quit "
+            }
             Mode::EditValue => " [Enter] save  [Esc] cancel ",
             Mode::AddSecret => " [Tab] focus  [Enter] save  [Esc] cancel ",
             Mode::SchemaEdit => " [Tab] field  [Enter] save  [Esc] cancel ",
-            Mode::Recipients => " [space] toggle  [a] add by pubkey  [g] github:user  [Enter] confirm  [Esc] cancel ",
+            Mode::Recipients => {
+                " [space] toggle  [a] add by pubkey  [g] github:user  [Enter] confirm  [Esc] cancel "
+            }
             Mode::ImportWizard => " [Tab] choose  [Enter] confirm  [Esc] cancel ",
             Mode::DiffView => " [↑↓] nav  [Esc] back ",
             Mode::Help => " [Esc] close ",
@@ -505,13 +508,14 @@ impl App {
             &mut self.recipients_state,
         );
 
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .title(if self.recipients_input_active {
-                " Add (paste age1… and Enter, Esc to leave input) "
-            } else {
-                " Add (press 'a' to focus input) "
-            });
+        let input_block =
+            Block::default()
+                .borders(Borders::ALL)
+                .title(if self.recipients_input_active {
+                    " Add (paste age1… and Enter, Esc to leave input) "
+                } else {
+                    " Add (press 'a' to focus input) "
+                });
         let input_inner = input_block.inner(chunks[1]);
         f.render_widget(input_block, chunks[1]);
         if self.recipients_input_active {
@@ -536,8 +540,7 @@ impl App {
         let area = centered_rect(50, 70, f.area());
         f.render_widget(Clear, area);
         f.render_widget(
-            Paragraph::new(HELP_TEXT)
-                .block(Block::default().borders(Borders::ALL).title(" Help ")),
+            Paragraph::new(HELP_TEXT).block(Block::default().borders(Borders::ALL).title(" Help ")),
             area,
         );
     }
@@ -570,9 +573,7 @@ impl App {
             }
             _ => {
                 f.render_widget(
-                    Paragraph::new(
-                        "\n  Not implemented yet.\n  Press Esc to return.",
-                    ),
+                    Paragraph::new("\n  Not implemented yet.\n  Press Esc to return."),
                     inner,
                 );
             }
