@@ -130,7 +130,21 @@ pub fn unlock(app: &mut App) -> Result<()> {
         }
         crate::core::ops::mark_missing_against_example(&mut rows, Path::new(".env.example"));
         app.rows = rows;
-        app.schema = vault.schema.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        app.schema = vault
+            .schema
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        let own_pubkey = identity.to_public().to_string();
+        app.recipients = vault
+            .recipients
+            .iter()
+            .map(|pk| crate::tui::Recipient {
+                pubkey: pk.clone(),
+                display_name: None,
+                is_self: pk == &own_pubkey,
+            })
+            .collect();
     }
 
     app.unlock = UnlockState::Unlocked;

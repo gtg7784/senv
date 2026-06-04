@@ -60,20 +60,22 @@ pub fn import_silent(path: &Path) -> Result<usize> {
         anyhow::bail!("no identity found in keyring; run `senv init` first");
     }
     let id = identity::load(account)?;
-    let recipient = id.to_public();
+    let own_recipient = id.to_public();
 
     let vault_path = Path::new(VAULT_FILENAME);
     let mut vault = if vault_path.exists() {
         vault_file::read(vault_path)?
     } else {
-        Vault::new(recipient.to_string())
+        Vault::new(own_recipient.to_string())
     };
+
+    let recipients = parse_recipients(&vault.recipients)?;
 
     let mut count = 0_usize;
     for row in &rows {
         if let Some(secret) = &row.shared {
             let exposed: &str = secret.expose_secret();
-            let ciphertext = vault_file::encrypt_value(exposed, &recipient)?;
+            let ciphertext = vault_file::encrypt_value(exposed, &recipients)?;
             vault.secrets.insert(
                 row.key.clone(),
                 EncryptedEntry {
@@ -88,6 +90,20 @@ pub fn import_silent(path: &Path) -> Result<usize> {
     vault.mac = vault_file::compute_mac(&vault);
     vault_file::write(vault_path, &vault)?;
     Ok(count)
+}
+
+fn parse_recipients(pubkeys: &[String]) -> Result<Vec<age::x25519::Recipient>> {
+    let mut out = Vec::with_capacity(pubkeys.len());
+    for pk in pubkeys {
+        let r = pk
+            .parse::<age::x25519::Recipient>()
+            .map_err(|e| anyhow::anyhow!("invalid recipient '{}': {}", pk, e))?;
+        out.push(r);
+    }
+    if out.is_empty() {
+        anyhow::bail!("vault has no valid recipients");
+    }
+    Ok(out)
 }
 
 pub fn build_import_preview(path: &Path) -> Result<crate::tui::ImportPreview> {
@@ -330,19 +346,21 @@ fn save_app_rows_to_vault(app: &App) -> Result<()> {
         anyhow::bail!("no identity in keyring; run `senv init` first");
     }
     let id = identity::load(account)?;
-    let recipient = id.to_public();
+    let own_recipient = id.to_public();
 
     let mut vault = if vault_path.exists() {
         vault_file::read(vault_path)?
     } else {
-        Vault::new(recipient.to_string())
+        Vault::new(own_recipient.to_string())
     };
+
+    let recipients = parse_recipients(&vault.recipients)?;
 
     let mut new_secrets = std::collections::BTreeMap::new();
     for row in &app.rows {
         if let Some(secret) = &row.shared {
             let exposed: &str = secret.expose_secret();
-            let ciphertext = vault_file::encrypt_value(exposed, &recipient)?;
+            let ciphertext = vault_file::encrypt_value(exposed, &recipients)?;
             let scoped = vault
                 .secrets
                 .get(&row.key)
@@ -367,6 +385,121 @@ fn save_app_rows_to_vault(app: &App) -> Result<()> {
     vault_file::write(vault_path, &vault)?;
 
     Ok(())
+}
+
+pub fn add_recipient(app: &mut App, pubkey: &str) -> Result<()> {
+    let pubkey = pubkey.trim().to_string();
+    if pubkey.is_empty() {
+        anyhow::bail!("empty pubkey");
+    }
+    let _: age::x25519::Recipient = pubkey
+        .parse()
+        .map_err(|e| anyhow::anyhow!("invalid age pubkey: {}", e))?;
+
+    let vault_path = Path::new(VAULT_FILENAME);
+    if !vault_path.exists() {
+        anyhow::bail!(".env.age not found; run `senv init` first");
+    }
+    let mut vault = vault_file::read(vault_path)?;
+    if vault.recipients.contains(&pubkey) {
+        anyhow::bail!("recipient already present");
+    }
+    vault.recipients.push(pubkey.clone());
+
+    let recipients = parse_recipients(&vault.recipients)?;
+    let id = identity::load(identity::DEFAULT_ACCOUNT)?;
+    let mut new_secrets = std::collections::BTreeMap::new();
+    for (key, entry) in &vault.secrets {
+        if entry.shared.is_empty() {
+            new_secrets.insert(key.clone(), entry.clone());
+            continue;
+        }
+        let plaintext = vault_file::decrypt_value(&entry.shared, &id)?;
+        let ciphertext = vault_file::encrypt_value(&plaintext, &recipients)?;
+        new_secrets.insert(
+            key.clone(),
+            EncryptedEntry {
+                shared: ciphertext,
+                scoped: entry.scoped.clone(),
+            },
+        );
+    }
+    vault.secrets = new_secrets;
+    vault.mac = vault_file::compute_mac(&vault);
+    vault_file::write(vault_path, &vault)?;
+
+    let own_pubkey = id.to_public().to_string();
+    app.recipients = vault
+        .recipients
+        .iter()
+        .map(|pk| crate::tui::Recipient {
+            pubkey: pk.clone(),
+            display_name: None,
+            is_self: pk == &own_pubkey,
+        })
+        .collect();
+    push_activity(app, format!("add recipient {}", short_pk(&pubkey)));
+    Ok(())
+}
+
+pub fn remove_recipient(app: &mut App, pubkey: &str) -> Result<()> {
+    let vault_path = Path::new(VAULT_FILENAME);
+    if !vault_path.exists() {
+        anyhow::bail!(".env.age not found; run `senv init` first");
+    }
+    let mut vault = vault_file::read(vault_path)?;
+
+    if vault.recipients.len() <= 1 {
+        anyhow::bail!("cannot remove the last recipient");
+    }
+    let before = vault.recipients.len();
+    vault.recipients.retain(|r| r != pubkey);
+    if vault.recipients.len() == before {
+        anyhow::bail!("recipient not found");
+    }
+
+    let recipients = parse_recipients(&vault.recipients)?;
+    let id = identity::load(identity::DEFAULT_ACCOUNT)?;
+    let mut new_secrets = std::collections::BTreeMap::new();
+    for (key, entry) in &vault.secrets {
+        if entry.shared.is_empty() {
+            new_secrets.insert(key.clone(), entry.clone());
+            continue;
+        }
+        let plaintext = vault_file::decrypt_value(&entry.shared, &id)?;
+        let ciphertext = vault_file::encrypt_value(&plaintext, &recipients)?;
+        new_secrets.insert(
+            key.clone(),
+            EncryptedEntry {
+                shared: ciphertext,
+                scoped: entry.scoped.clone(),
+            },
+        );
+    }
+    vault.secrets = new_secrets;
+    vault.mac = vault_file::compute_mac(&vault);
+    vault_file::write(vault_path, &vault)?;
+
+    let own_pubkey = id.to_public().to_string();
+    app.recipients = vault
+        .recipients
+        .iter()
+        .map(|pk| crate::tui::Recipient {
+            pubkey: pk.clone(),
+            display_name: None,
+            is_self: pk == &own_pubkey,
+        })
+        .collect();
+    push_activity(app, format!("revoke {}", short_pk(pubkey)));
+    Ok(())
+}
+
+fn short_pk(pk: &str) -> String {
+    if pk.len() > 14 {
+        format!("{}…{}", &pk[..8], &pk[pk.len() - 4..])
+    } else {
+        pk.to_string()
+    }
 }
 
 pub fn commit_schema_edit(app: &mut App) -> Result<()> {
