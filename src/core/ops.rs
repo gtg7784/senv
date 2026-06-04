@@ -209,3 +209,41 @@ pub fn commit_edit(_app: &mut App) -> Result<()> {
 pub fn commit_new_secret(_app: &mut App) -> Result<()> {
     Ok(())
 }
+
+pub fn collect_env_pairs() -> Result<Vec<(String, String)>> {
+    let vault_path = Path::new(VAULT_FILENAME);
+
+    if vault_path.exists() {
+        let account = identity::DEFAULT_ACCOUNT;
+        if !identity::exists(account) {
+            anyhow::bail!("vault exists but no identity in keyring; run `senv init`");
+        }
+        let id = identity::load(account)?;
+        let vault = vault_file::read(vault_path)?;
+        if !vault_file::verify_mac(&vault) {
+            anyhow::bail!("vault integrity check failed (BLAKE3 MAC mismatch)");
+        }
+        let mut pairs = Vec::with_capacity(vault.secrets.len());
+        for (key, entry) in &vault.secrets {
+            if entry.shared.is_empty() {
+                continue;
+            }
+            let pt = vault_file::decrypt_value(&entry.shared, &id)
+                .with_context(|| format!("decrypt {}", key))?;
+            pairs.push((key.clone(), pt));
+        }
+        Ok(pairs)
+    } else if Path::new(".env").exists() {
+        let rows = import_env_file(Path::new(".env"))?;
+        let mut pairs = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let Some(secret) = row.shared {
+                let v: &str = secret.expose_secret();
+                pairs.push((row.key, v.to_string()));
+            }
+        }
+        Ok(pairs)
+    } else {
+        anyhow::bail!("no .env.age or .env found in cwd")
+    }
+}
