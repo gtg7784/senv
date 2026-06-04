@@ -5,6 +5,7 @@ use ratatui::{
     },
 };
 use secrecy::{ExposeSecret, SecretString};
+use tui_textarea::TextArea;
 
 pub struct SecretRow {
     pub key: String,
@@ -61,6 +62,9 @@ pub struct App {
     pub activity: Vec<ActivityLine>,
 
     pub mode: Mode,
+    pub edit_buffer: TextArea<'static>,
+    pub edit_key_name: Option<String>,
+
     pub should_quit: bool,
 }
 
@@ -87,6 +91,8 @@ impl App {
             recipients_state: ListState::default(),
             activity: Vec::new(),
             mode: Mode::Normal,
+            edit_buffer: TextArea::default(),
+            edit_key_name: None,
             should_quit: false,
         }
     }
@@ -273,7 +279,7 @@ impl App {
             let table = Table::new(rows, widths)
                 .header(header)
                 .block(Block::default().borders(Borders::ALL).title(title))
-                .highlight_style(Style::new().bg(Color::DarkGray))
+                .row_highlight_style(Style::new().bg(Color::DarkGray))
                 .highlight_symbol("▸ ");
             f.render_stateful_widget(table, area, &mut self.row_state);
         }
@@ -341,22 +347,37 @@ impl App {
     }
 
     fn render_placeholder_modal(&self, f: &mut Frame) {
-        let area = centered_rect(60, 30, f.area());
+        let area = centered_rect(70, 50, f.area());
         f.render_widget(Clear, area);
-        let title = match self.mode {
-            Mode::EditValue => " Edit value ",
-            Mode::AddSecret => " Add secret ",
-            Mode::SchemaEdit => " Edit schema ",
-            Mode::Recipients => " Recipients ",
-            Mode::ImportWizard => " Import .env wizard ",
-            Mode::DiffView => " Diff vs .env.example ",
-            _ => " Modal ",
+        let title: String = match self.mode {
+            Mode::EditValue => match &self.edit_key_name {
+                Some(k) => format!(" Edit value · {} ", k),
+                None => " Edit value ".to_string(),
+            },
+            Mode::AddSecret => " Add secret · KEY=VALUE ".to_string(),
+            Mode::SchemaEdit => " Edit schema ".to_string(),
+            Mode::Recipients => " Recipients ".to_string(),
+            Mode::ImportWizard => " Import .env wizard ".to_string(),
+            Mode::DiffView => " Diff vs .env.example ".to_string(),
+            _ => " Modal ".to_string(),
         };
-        f.render_widget(
-            Paragraph::new("\n  Not implemented yet.\n  Press Esc to return.")
-                .block(Block::default().borders(Borders::ALL).title(title)),
-            area,
-        );
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        match self.mode {
+            Mode::EditValue | Mode::AddSecret => {
+                f.render_widget(&self.edit_buffer, inner);
+            }
+            _ => {
+                f.render_widget(
+                    Paragraph::new(
+                        "\n  Not implemented yet.\n  Press Esc to return.",
+                    ),
+                    inner,
+                );
+            }
+        }
     }
 }
 
