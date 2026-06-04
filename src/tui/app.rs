@@ -370,7 +370,7 @@ impl App {
                 " [space] toggle  [a] add by pubkey  [g] github:user  [Enter] confirm  [Esc] cancel "
             }
             Mode::ImportWizard => " [Tab] choose  [Enter] confirm  [Esc] cancel ",
-            Mode::DiffView => " [↑↓] nav  [Esc] back ",
+            Mode::DiffView => " [↑↓/jk] nav  [Esc] back ",
             Mode::Help => " [Esc] close ",
         };
         f.render_widget(
