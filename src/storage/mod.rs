@@ -16,6 +16,8 @@ pub struct Vault {
     pub secrets: BTreeMap<String, EncryptedEntry>,
     #[serde(default)]
     pub mac: String,
+    #[serde(default)]
+    pub schema: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -34,6 +36,7 @@ impl Vault {
             recipients: vec![recipient_pubkey],
             secrets: BTreeMap::new(),
             mac: String::new(),
+            schema: BTreeMap::new(),
         }
     }
 }
