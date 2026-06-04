@@ -1,0 +1,420 @@
+use ratatui::{
+    prelude::*,
+    widgets::{
+        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+    },
+};
+use secrecy::{ExposeSecret, SecretString};
+
+pub struct SecretRow {
+    pub key: String,
+    pub shared: Option<SecretString>,
+    pub scoped: Option<SecretString>,
+    pub missing_in_example: bool,
+}
+
+pub struct Recipient {
+    pub pubkey: String,
+    pub display_name: Option<String>,
+    pub is_self: bool,
+}
+
+pub struct ActivityLine {
+    pub time: String,
+    pub message: String,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum Mode {
+    Normal,
+    EditValue,
+    AddSecret,
+    SchemaEdit,
+    Recipients,
+    DiffView,
+    ImportWizard,
+    Help,
+}
+
+#[derive(PartialEq, Eq, Clone, Copy)]
+pub enum UnlockState {
+    Locked,
+    Unlocked,
+    Expired,
+}
+
+pub struct App {
+    pub project_name: String,
+    pub git_remote: Option<String>,
+    pub unlock: UnlockState,
+
+    pub environments: Vec<String>,
+    pub env_index: usize,
+
+    pub rows: Vec<SecretRow>,
+    pub row_state: TableState,
+    pub reveal: bool,
+
+    pub recipients: Vec<Recipient>,
+    pub recipients_state: ListState,
+
+    pub activity: Vec<ActivityLine>,
+
+    pub mode: Mode,
+    pub should_quit: bool,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl App {
+    pub fn new() -> Self {
+        let mut row_state = TableState::default();
+        row_state.select(Some(0));
+        Self {
+            project_name: "—".to_string(),
+            git_remote: None,
+            unlock: UnlockState::Locked,
+            environments: vec!["dev".to_string(), "staging".to_string(), "prod".to_string()],
+            env_index: 0,
+            rows: Vec::new(),
+            row_state,
+            reveal: false,
+            recipients: Vec::new(),
+            recipients_state: ListState::default(),
+            activity: Vec::new(),
+            mode: Mode::Normal,
+            should_quit: false,
+        }
+    }
+
+    pub fn select_prev_row(&mut self) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let i = self.row_state.selected().unwrap_or(0);
+        let next = if i == 0 { self.rows.len() - 1 } else { i - 1 };
+        self.row_state.select(Some(next));
+    }
+
+    pub fn select_next_row(&mut self) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let i = self.row_state.selected().unwrap_or(0);
+        let next = if i + 1 >= self.rows.len() { 0 } else { i + 1 };
+        self.row_state.select(Some(next));
+    }
+
+    pub fn cycle_env_next(&mut self) {
+        if self.environments.is_empty() {
+            return;
+        }
+        self.env_index = (self.env_index + 1) % self.environments.len();
+    }
+
+    pub fn cycle_env_prev(&mut self) {
+        if self.environments.is_empty() {
+            return;
+        }
+        self.env_index = if self.env_index == 0 {
+            self.environments.len() - 1
+        } else {
+            self.env_index - 1
+        };
+    }
+
+    pub fn effective<'a>(&self, row: &'a SecretRow) -> Option<&'a SecretString> {
+        row.scoped.as_ref().or(row.shared.as_ref())
+    }
+
+    pub fn render(&mut self, f: &mut Frame) {
+        let outer = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(f.area());
+
+        self.render_header(f, outer[0]);
+
+        let body = Layout::horizontal([
+            Constraint::Length(12),
+            Constraint::Min(40),
+            Constraint::Length(30),
+        ])
+        .split(outer[1]);
+
+        self.render_env_tabs(f, body[0]);
+        self.render_secret_table(f, body[1]);
+
+        let sidebar =
+            Layout::vertical([Constraint::Percentage(50), Constraint::Percentage(50)])
+                .split(body[2]);
+        self.render_recipients(f, sidebar[0]);
+        self.render_activity(f, sidebar[1]);
+
+        self.render_keymap_hint(f, outer[2]);
+
+        if self.mode == Mode::Help {
+            self.render_help_overlay(f);
+        } else if self.mode != Mode::Normal {
+            self.render_placeholder_modal(f);
+        }
+    }
+
+    fn render_header(&self, f: &mut Frame, area: Rect) {
+        let lock_span = match self.unlock {
+            UnlockState::Locked => {
+                Span::styled("🔒 locked", Style::new().fg(Color::Red).bold())
+            }
+            UnlockState::Unlocked => {
+                Span::styled("🔓 unlocked", Style::new().fg(Color::Green).bold())
+            }
+            UnlockState::Expired => {
+                Span::styled("⏰ expired", Style::new().fg(Color::Yellow).bold())
+            }
+        };
+
+        let mut spans = vec![
+            Span::styled(
+                " senv ",
+                Style::new().bg(Color::DarkGray).fg(Color::White).bold(),
+            ),
+            Span::raw(" │ "),
+            Span::raw(format!("project: {}", self.project_name)),
+        ];
+        if let Some(remote) = &self.git_remote {
+            spans.push(Span::raw(" "));
+            spans.push(Span::styled(
+                remote.clone(),
+                Style::new().fg(Color::DarkGray).italic(),
+            ));
+        }
+        spans.push(Span::raw(" │ "));
+        spans.push(lock_span);
+
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+    }
+
+    fn render_env_tabs(&self, f: &mut Frame, area: Rect) {
+        let items: Vec<ListItem> = self
+            .environments
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                let marker = if i == self.env_index { "▶" } else { " " };
+                let line = format!("{} {}", marker, name);
+                let style = if i == self.env_index {
+                    Style::new().fg(Color::Cyan).bold()
+                } else {
+                    Style::new()
+                };
+                ListItem::new(line).style(style)
+            })
+            .collect();
+
+        f.render_widget(
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Envs")),
+            area,
+        );
+    }
+
+    fn render_secret_table(&mut self, f: &mut Frame, area: Rect) {
+        let env_name = self
+            .environments
+            .get(self.env_index)
+            .cloned()
+            .unwrap_or_default();
+
+        let header = Row::new(vec!["KEY", "VALUE", "SOURCE", ""])
+            .style(Style::new().fg(Color::DarkGray).bold());
+
+        let reveal = self.reveal;
+        let rows: Vec<Row> = self
+            .rows
+            .iter()
+            .map(|row| {
+                let effective = row.scoped.as_ref().or(row.shared.as_ref());
+                let value_cell = render_value_cell(reveal, effective);
+                let source = match (row.shared.is_some(), row.scoped.is_some()) {
+                    (_, true) => Cell::from("yours").fg(Color::Magenta),
+                    (true, _) => Cell::from("shared").fg(Color::Cyan),
+                    _ => Cell::from("—").fg(Color::DarkGray),
+                };
+                let status = if row.missing_in_example {
+                    Cell::from("⚠ missing").fg(Color::Yellow)
+                } else {
+                    Cell::from("")
+                };
+                Row::new(vec![Cell::from(row.key.clone()), value_cell, source, status])
+            })
+            .collect();
+
+        let widths = [
+            Constraint::Length(22),
+            Constraint::Min(20),
+            Constraint::Length(8),
+            Constraint::Length(24),
+        ];
+
+        let title = format!("Secrets · {}", env_name);
+
+        if self.rows.is_empty() {
+            let empty = Paragraph::new(
+                "\n  No secrets yet.\n\n  Press [i] to import .env  ·  [a] to add a secret",
+            )
+            .block(Block::default().borders(Borders::ALL).title(title));
+            f.render_widget(empty, area);
+        } else {
+            let table = Table::new(rows, widths)
+                .header(header)
+                .block(Block::default().borders(Borders::ALL).title(title))
+                .highlight_style(Style::new().bg(Color::DarkGray))
+                .highlight_symbol("▸ ");
+            f.render_stateful_widget(table, area, &mut self.row_state);
+        }
+    }
+
+    fn render_recipients(&mut self, f: &mut Frame, area: Rect) {
+        let items: Vec<ListItem> = self
+            .recipients
+            .iter()
+            .map(|r| {
+                let marker = if r.is_self { "★" } else { "·" };
+                let name = r.display_name.as_deref().unwrap_or("(unnamed)");
+                let suffix = if r.is_self { " (you)" } else { "" };
+                ListItem::new(format!("{} {}{}", marker, name, suffix))
+            })
+            .collect();
+
+        f.render_stateful_widget(
+            List::new(items)
+                .block(Block::default().borders(Borders::ALL).title("Recipients")),
+            area,
+            &mut self.recipients_state,
+        );
+    }
+
+    fn render_activity(&self, f: &mut Frame, area: Rect) {
+        let items: Vec<ListItem> = self
+            .activity
+            .iter()
+            .rev()
+            .take(20)
+            .map(|a| ListItem::new(format!("{}  {}", a.time, a.message)))
+            .collect();
+        f.render_widget(
+            List::new(items).block(Block::default().borders(Borders::ALL).title("Activity")),
+            area,
+        );
+    }
+
+    fn render_keymap_hint(&self, f: &mut Frame, area: Rect) {
+        let hint = match self.mode {
+            Mode::Normal => " [↑↓/jk] nav  [space] reveal  [e] edit  [a] add  [t] env  [s] schema  [r] recipients  [i] import  [?] help  [q] quit ",
+            Mode::EditValue => " [Enter] save  [Esc] cancel ",
+            Mode::AddSecret => " [Tab] focus  [Enter] save  [Esc] cancel ",
+            Mode::SchemaEdit => " [Tab] field  [Enter] save  [Esc] cancel ",
+            Mode::Recipients => " [space] toggle  [a] add by pubkey  [g] github:user  [Enter] confirm  [Esc] cancel ",
+            Mode::ImportWizard => " [Tab] choose  [Enter] confirm  [Esc] cancel ",
+            Mode::DiffView => " [↑↓] nav  [Esc] back ",
+            Mode::Help => " [Esc] close ",
+        };
+        f.render_widget(
+            Paragraph::new(hint).style(Style::new().bg(Color::DarkGray).fg(Color::White)),
+            area,
+        );
+    }
+
+    fn render_help_overlay(&self, f: &mut Frame) {
+        let area = centered_rect(50, 70, f.area());
+        f.render_widget(Clear, area);
+        f.render_widget(
+            Paragraph::new(HELP_TEXT)
+                .block(Block::default().borders(Borders::ALL).title(" Help ")),
+            area,
+        );
+    }
+
+    fn render_placeholder_modal(&self, f: &mut Frame) {
+        let area = centered_rect(60, 30, f.area());
+        f.render_widget(Clear, area);
+        let title = match self.mode {
+            Mode::EditValue => " Edit value ",
+            Mode::AddSecret => " Add secret ",
+            Mode::SchemaEdit => " Edit schema ",
+            Mode::Recipients => " Recipients ",
+            Mode::ImportWizard => " Import .env wizard ",
+            Mode::DiffView => " Diff vs .env.example ",
+            _ => " Modal ",
+        };
+        f.render_widget(
+            Paragraph::new("\n  Not implemented yet.\n  Press Esc to return.")
+                .block(Block::default().borders(Borders::ALL).title(title)),
+            area,
+        );
+    }
+}
+
+fn render_value_cell(reveal: bool, effective: Option<&SecretString>) -> Cell<'static> {
+    match effective {
+        None => Cell::from("(empty)").fg(Color::DarkGray),
+        Some(secret) => {
+            if reveal {
+                Cell::from(secret.expose_secret().to_string())
+            } else {
+                let len = secret.expose_secret().len().clamp(4, 12);
+                Cell::from("●".repeat(len)).fg(Color::DarkGray)
+            }
+        }
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let vertical = Layout::vertical([
+        Constraint::Percentage((100 - percent_y) / 2),
+        Constraint::Percentage(percent_y),
+        Constraint::Percentage((100 - percent_y) / 2),
+    ])
+    .split(area);
+    Layout::horizontal([
+        Constraint::Percentage((100 - percent_x) / 2),
+        Constraint::Percentage(percent_x),
+        Constraint::Percentage((100 - percent_x) / 2),
+    ])
+    .split(vertical[1])[1]
+}
+
+const HELP_TEXT: &str = "senv — encrypted .env replacement
+
+Movement:
+  ↑↓ / jk      Navigate rows
+  t / T        Cycle env tab (next / prev)
+
+Secrets:
+  space        Reveal/mask current value
+  e            Edit value
+  a            Add secret
+  d            Delete (confirm)
+  o            Toggle 'yours' (scoped override)
+  s            Edit schema
+
+Team / sharing:
+  r            Manage recipients
+
+Discovery & sync:
+  i            Import .env (migration wizard)
+  D            Diff vs .env.example
+  R            Reload from disk
+
+Session:
+  L            Lock now
+  U            Unlock
+
+Other:
+  ?            This help
+  q / Ctrl+C   Quit";
