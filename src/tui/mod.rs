@@ -1,6 +1,6 @@
 mod app;
 
-pub use app::{ActivityLine, App, Mode, SecretRow, UnlockState};
+pub use app::{ActivityLine, App, DiffEntry, DiffKind, Mode, SecretRow, UnlockState};
 
 use std::io;
 use std::time::Duration;
@@ -73,11 +73,42 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         Mode::EditValue => handle_edit_value(app, key)?,
         Mode::AddSecret => handle_add_secret(app, key)?,
+        Mode::DiffView => handle_diff_view(app, key)?,
         _ => {
             if key.code == KeyCode::Esc {
                 app.mode = Mode::Normal;
             }
         }
+    }
+    Ok(())
+}
+
+fn handle_diff_view(app: &mut App, key: KeyEvent) -> Result<()> {
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Up | KeyCode::Char('k') => {
+            if !app.diff_entries.is_empty() {
+                let i = app.diff_state.selected().unwrap_or(0);
+                let next = if i == 0 {
+                    app.diff_entries.len() - 1
+                } else {
+                    i - 1
+                };
+                app.diff_state.select(Some(next));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if !app.diff_entries.is_empty() {
+                let i = app.diff_state.selected().unwrap_or(0);
+                let next = if i + 1 >= app.diff_entries.len() {
+                    0
+                } else {
+                    i + 1
+                };
+                app.diff_state.select(Some(next));
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -125,7 +156,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('s') => app.mode = Mode::SchemaEdit,
         KeyCode::Char('r') => app.mode = Mode::Recipients,
         KeyCode::Char('i') => app.mode = Mode::ImportWizard,
-        KeyCode::Char('D') => app.mode = Mode::DiffView,
+        KeyCode::Char('D') => enter_diff_view(app),
         KeyCode::Char('R') => crate::core::ops::reload_from_disk(app)?,
         KeyCode::Char('L') => crate::crypto::identity::lock(app)?,
         KeyCode::Char('U') => crate::crypto::identity::unlock(app)?,
@@ -165,4 +196,13 @@ fn reset_edit_buffer(app: &mut App) {
     app.edit_buffer = tui_textarea::TextArea::default();
     app.edit_key_name = None;
     app.mode = Mode::Normal;
+}
+
+fn enter_diff_view(app: &mut App) {
+    app.diff_entries = crate::core::ops::compute_diff(app);
+    app.diff_state = ratatui::widgets::ListState::default();
+    if !app.diff_entries.is_empty() {
+        app.diff_state.select(Some(0));
+    }
+    app.mode = Mode::DiffView;
 }

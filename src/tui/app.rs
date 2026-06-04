@@ -25,6 +25,19 @@ pub struct ActivityLine {
     pub message: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+pub enum DiffKind {
+    Missing,
+    Extra,
+    Match,
+}
+
+#[derive(Clone)]
+pub struct DiffEntry {
+    pub key: String,
+    pub kind: DiffKind,
+}
+
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub enum Mode {
     Normal,
@@ -65,6 +78,9 @@ pub struct App {
     pub edit_buffer: TextArea<'static>,
     pub edit_key_name: Option<String>,
 
+    pub diff_entries: Vec<DiffEntry>,
+    pub diff_state: ListState,
+
     pub should_quit: bool,
 }
 
@@ -93,6 +109,8 @@ impl App {
             mode: Mode::Normal,
             edit_buffer: TextArea::default(),
             edit_key_name: None,
+            diff_entries: Vec::new(),
+            diff_state: ListState::default(),
             should_quit: false,
         }
     }
@@ -165,10 +183,11 @@ impl App {
 
         self.render_keymap_hint(f, outer[2]);
 
-        if self.mode == Mode::Help {
-            self.render_help_overlay(f);
-        } else if self.mode != Mode::Normal {
-            self.render_placeholder_modal(f);
+        match self.mode {
+            Mode::Help => self.render_help_overlay(f),
+            Mode::DiffView => self.render_diff_overlay(f),
+            Mode::Normal => {}
+            _ => self.render_placeholder_modal(f),
         }
     }
 
@@ -333,6 +352,64 @@ impl App {
         f.render_widget(
             Paragraph::new(hint).style(Style::new().bg(Color::DarkGray).fg(Color::White)),
             area,
+        );
+    }
+
+    fn render_diff_overlay(&mut self, f: &mut Frame) {
+        let area = centered_rect(70, 70, f.area());
+        f.render_widget(Clear, area);
+
+        let missing = self
+            .diff_entries
+            .iter()
+            .filter(|e| e.kind == DiffKind::Missing)
+            .count();
+        let extra = self
+            .diff_entries
+            .iter()
+            .filter(|e| e.kind == DiffKind::Extra)
+            .count();
+        let title = format!(
+            " Diff vs .env.example · {} missing · {} extra ",
+            missing, extra
+        );
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        if self.diff_entries.is_empty() {
+            f.render_widget(
+                Paragraph::new(
+                    "\n  ✓ No differences (or .env.example not found)\n  Press Esc to return.",
+                ),
+                inner,
+            );
+            return;
+        }
+
+        let items: Vec<ListItem> = self
+            .diff_entries
+            .iter()
+            .map(|e| {
+                let (icon, color) = match e.kind {
+                    DiffKind::Missing => ("⚠ MISSING", Color::Yellow),
+                    DiffKind::Extra => ("+ EXTRA  ", Color::Green),
+                    DiffKind::Match => ("✓ OK     ", Color::DarkGray),
+                };
+                ListItem::new(Line::from(vec![
+                    Span::styled(icon, Style::new().fg(color)),
+                    Span::raw("  "),
+                    Span::raw(e.key.clone()),
+                ]))
+            })
+            .collect();
+
+        f.render_stateful_widget(
+            List::new(items)
+                .highlight_style(Style::new().bg(Color::DarkGray))
+                .highlight_symbol("▸ "),
+            inner,
+            &mut self.diff_state,
         );
     }
 
