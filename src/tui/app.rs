@@ -91,6 +91,8 @@ pub struct App {
 
     pub schema: std::collections::HashMap<String, String>,
 
+    pub recipients_input_active: bool,
+
     pub should_quit: bool,
 }
 
@@ -123,6 +125,7 @@ impl App {
             diff_state: ListState::default(),
             import_preview: None,
             schema: std::collections::HashMap::new(),
+            recipients_input_active: false,
             should_quit: false,
         }
     }
@@ -199,6 +202,7 @@ impl App {
             Mode::Help => self.render_help_overlay(f),
             Mode::DiffView => self.render_diff_overlay(f),
             Mode::ImportWizard => self.render_import_overlay(f),
+            Mode::Recipients => self.render_recipients_overlay(f),
             Mode::Normal => {}
             _ => self.render_placeholder_modal(f),
         }
@@ -459,6 +463,69 @@ impl App {
             .map(|(k, len)| ListItem::new(format!("  🔒 {}  ({} bytes)", k, len)))
             .collect();
         f.render_widget(List::new(items), chunks[1]);
+    }
+
+    fn render_recipients_overlay(&mut self, f: &mut Frame) {
+        let area = centered_rect(80, 60, f.area());
+        f.render_widget(Clear, area);
+        let title = format!(" Recipients · {} ", self.recipients.len());
+        let block = Block::default().borders(Borders::ALL).title(title);
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
+        let chunks = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Length(3),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+
+        let items: Vec<ListItem> = self
+            .recipients
+            .iter()
+            .map(|r| {
+                let marker = if r.is_self { "★" } else { "·" };
+                let suffix = if r.is_self { " (you)" } else { "" };
+                ListItem::new(Line::from(vec![
+                    Span::raw(format!("{} ", marker)),
+                    Span::styled(r.pubkey.clone(), Style::new().fg(Color::Cyan)),
+                    Span::styled(suffix, Style::new().fg(Color::Green)),
+                ]))
+            })
+            .collect();
+        f.render_stateful_widget(
+            List::new(items)
+                .highlight_style(Style::new().bg(Color::DarkGray))
+                .highlight_symbol("▸ "),
+            chunks[0],
+            &mut self.recipients_state,
+        );
+
+        let input_block = Block::default()
+            .borders(Borders::ALL)
+            .title(if self.recipients_input_active {
+                " Add (paste age1… and Enter, Esc to leave input) "
+            } else {
+                " Add (press 'a' to focus input) "
+            });
+        let input_inner = input_block.inner(chunks[1]);
+        f.render_widget(input_block, chunks[1]);
+        if self.recipients_input_active {
+            f.render_widget(&self.edit_buffer, input_inner);
+        } else {
+            f.render_widget(
+                Paragraph::new("  age1...").style(Style::new().fg(Color::DarkGray)),
+                input_inner,
+            );
+        }
+
+        f.render_widget(
+            Paragraph::new(
+                " [j/k] nav  [a] focus input / submit  [d] revoke selected  [Esc] back ",
+            )
+            .style(Style::new().fg(Color::DarkGray)),
+            chunks[2],
+        );
     }
 
     fn render_help_overlay(&self, f: &mut Frame) {

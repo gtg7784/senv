@@ -1,7 +1,7 @@
 mod app;
 
 pub use app::{
-    ActivityLine, App, DiffEntry, DiffKind, ImportPreview, Mode, SecretRow, UnlockState,
+    ActivityLine, App, DiffEntry, DiffKind, ImportPreview, Mode, Recipient, SecretRow, UnlockState,
 };
 
 use std::io;
@@ -78,11 +78,7 @@ fn handle_key(app: &mut App, key: KeyEvent) -> Result<()> {
         Mode::DiffView => handle_diff_view(app, key)?,
         Mode::ImportWizard => handle_import_wizard(app, key)?,
         Mode::SchemaEdit => handle_schema_edit(app, key)?,
-        _ => {
-            if key.code == KeyCode::Esc {
-                app.mode = Mode::Normal;
-            }
-        }
+        Mode::Recipients => handle_recipients(app, key)?,
     }
     Ok(())
 }
@@ -193,7 +189,7 @@ fn handle_normal(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('d') => crate::core::ops::confirm_delete(app)?,
         KeyCode::Char('o') => crate::core::ops::toggle_scoped(app)?,
         KeyCode::Char('s') => enter_schema_edit(app),
-        KeyCode::Char('r') => app.mode = Mode::Recipients,
+        KeyCode::Char('r') => enter_recipients(app),
         KeyCode::Char('i') => enter_import_wizard(app),
         KeyCode::Char('D') => enter_diff_view(app),
         KeyCode::Char('R') => crate::core::ops::reload_from_disk(app)?,
@@ -254,6 +250,83 @@ fn enter_import_wizard(app: &mut App) {
         None
     };
     app.mode = Mode::ImportWizard;
+}
+
+fn enter_recipients(app: &mut App) {
+    let mut state = ratatui::widgets::ListState::default();
+    if !app.recipients.is_empty() {
+        state.select(Some(0));
+    }
+    app.recipients_state = state;
+    app.recipients_input_active = false;
+    app.edit_buffer = tui_textarea::TextArea::default();
+    app.mode = Mode::Recipients;
+}
+
+fn handle_recipients(app: &mut App, key: KeyEvent) -> Result<()> {
+    if app.recipients_input_active {
+        match key.code {
+            KeyCode::Esc => {
+                app.recipients_input_active = false;
+                app.edit_buffer = tui_textarea::TextArea::default();
+            }
+            KeyCode::Enter if !key.modifiers.contains(KeyModifiers::SHIFT) => {
+                let raw = app.edit_buffer.lines().join("").trim().to_string();
+                crate::core::ops::add_recipient(app, &raw)?;
+                app.recipients_input_active = false;
+                app.edit_buffer = tui_textarea::TextArea::default();
+            }
+            _ => {
+                app.edit_buffer.input(key);
+            }
+        }
+        return Ok(());
+    }
+
+    match key.code {
+        KeyCode::Esc => app.mode = Mode::Normal,
+        KeyCode::Up | KeyCode::Char('k') => {
+            if !app.recipients.is_empty() {
+                let i = app.recipients_state.selected().unwrap_or(0);
+                let next = if i == 0 { app.recipients.len() - 1 } else { i - 1 };
+                app.recipients_state.select(Some(next));
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if !app.recipients.is_empty() {
+                let i = app.recipients_state.selected().unwrap_or(0);
+                let next = if i + 1 >= app.recipients.len() { 0 } else { i + 1 };
+                app.recipients_state.select(Some(next));
+            }
+        }
+        KeyCode::Char('a') => {
+            app.recipients_input_active = true;
+            let mut ta = tui_textarea::TextArea::default();
+            ta.set_placeholder_text("age1...");
+            app.edit_buffer = ta;
+        }
+        KeyCode::Char('d') => {
+            let Some(idx) = app.recipients_state.selected() else {
+                return Ok(());
+            };
+            let pubkey = app
+                .recipients
+                .get(idx)
+                .map(|r| r.pubkey.clone())
+                .unwrap_or_default();
+            if !pubkey.is_empty() {
+                crate::core::ops::remove_recipient(app, &pubkey)?;
+                let new_len = app.recipients.len();
+                if new_len == 0 {
+                    app.recipients_state.select(None);
+                } else if idx >= new_len {
+                    app.recipients_state.select(Some(new_len - 1));
+                }
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn enter_schema_edit(app: &mut App) {
