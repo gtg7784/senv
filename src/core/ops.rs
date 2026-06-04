@@ -5,25 +5,84 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::crypto::identity;
+use crate::storage::{vault_file, EncryptedEntry, Vault, VAULT_FILENAME};
 use crate::tui::{App, SecretRow};
 
 pub fn init() -> Result<()> {
-    anyhow::bail!("`senv init` is not implemented yet")
+    let vault_path = Path::new(VAULT_FILENAME);
+    if vault_path.exists() {
+        anyhow::bail!(
+            "{} already exists; refusing to overwrite",
+            vault_path.display()
+        );
+    }
+
+    let account = identity::DEFAULT_ACCOUNT;
+    let recipient = if identity::exists(account) {
+        identity::load(account)?.to_public()
+    } else {
+        identity::generate_and_store(account)
+            .context("generate and store age identity")?
+    };
+
+    let mut vault = Vault::new(recipient.to_string());
+    vault.mac = vault_file::compute_mac(&vault);
+    vault_file::write(vault_path, &vault)?;
+
+    println!("✓ Initialized {}", vault_path.display());
+    println!("  recipient: {}", recipient);
+    println!("  identity stored in OS keyring");
+    println!(
+        "    service: {}  account: {}",
+        identity::KEYRING_SERVICE,
+        account
+    );
+    Ok(())
 }
 
 pub fn import(path: &Path) -> Result<()> {
     let rows = import_env_file(path)?;
-    println!("Imported {} entries from {}", rows.len(), path.display());
-    for row in &rows {
-        let bytes = match &row.shared {
-            Some(secret) => {
-                let exposed: &str = secret.expose_secret();
-                exposed.len()
-            }
-            None => 0,
-        };
-        println!("  {}  ({} bytes)", row.key, bytes);
+
+    let account = identity::DEFAULT_ACCOUNT;
+    if !identity::exists(account) {
+        anyhow::bail!("no identity found in keyring; run `senv init` first");
     }
+    let id = identity::load(account)?;
+    let recipient = id.to_public();
+
+    let vault_path = Path::new(VAULT_FILENAME);
+    let mut vault = if vault_path.exists() {
+        vault_file::read(vault_path)?
+    } else {
+        Vault::new(recipient.to_string())
+    };
+
+    let mut count = 0_usize;
+    for row in &rows {
+        if let Some(secret) = &row.shared {
+            let exposed: &str = secret.expose_secret();
+            let ciphertext = vault_file::encrypt_value(exposed, &recipient)?;
+            vault.secrets.insert(
+                row.key.clone(),
+                EncryptedEntry {
+                    shared: ciphertext,
+                    scoped: Default::default(),
+                },
+            );
+            count += 1;
+        }
+    }
+
+    vault.mac = vault_file::compute_mac(&vault);
+    vault_file::write(vault_path, &vault)?;
+
+    println!(
+        "✓ Encrypted {} entries from {} into {}",
+        count,
+        path.display(),
+        vault_path.display()
+    );
     Ok(())
 }
 
