@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use secrecy::{ExposeSecret, SecretString};
 
 use crate::crypto::identity;
-use crate::storage::{vault_file, EncryptedEntry, Vault, VAULT_FILENAME};
+use crate::storage::{EncryptedEntry, VAULT_FILENAME, Vault, vault_file};
 use crate::tui::{App, SecretRow};
 
 pub fn init() -> Result<()> {
@@ -22,8 +22,7 @@ pub fn init() -> Result<()> {
     let recipient = if identity::exists(account) {
         identity::load(account)?.to_public()
     } else {
-        identity::generate_and_store(account)
-            .context("generate and store age identity")?
+        identity::generate_and_store(account).context("generate and store age identity")?
     };
 
     let mut vault = Vault::new(recipient.to_string());
@@ -137,8 +136,7 @@ pub fn import_env_file(path: &Path) -> Result<Vec<SecretRow>> {
 
     let mut rows = Vec::new();
     for item in dotenvy::from_read_iter(content.as_bytes()) {
-        let (key, value) =
-            item.with_context(|| format!("failed to parse {}", path.display()))?;
+        let (key, value) = item.with_context(|| format!("failed to parse {}", path.display()))?;
         rows.push(SecretRow {
             key,
             shared: Some(SecretString::from(value)),
@@ -214,10 +212,7 @@ pub fn compute_diff(app: &mut App) -> Vec<crate::tui::DiffEntry> {
 
     all.into_iter()
         .map(|key| {
-            let kind = match (
-                example_keys.contains(&key),
-                current_keys.contains(&key),
-            ) {
+            let kind = match (example_keys.contains(&key), current_keys.contains(&key)) {
                 (true, false) => DiffKind::Missing,
                 (false, true) => DiffKind::Extra,
                 _ => DiffKind::Match,
@@ -502,6 +497,79 @@ fn short_pk(pk: &str) -> String {
     }
 }
 
+pub fn commit_schema_edit(app: &mut App) -> Result<()> {
+    let key_name = app
+        .edit_key_name
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no key being edited"))?;
+    let new_desc = app.edit_buffer.lines().join("\n").trim().to_string();
+
+    if new_desc.is_empty() {
+        app.schema.remove(&key_name);
+    } else {
+        app.schema.insert(key_name.clone(), new_desc);
+    }
+
+    save_app_rows_to_vault(app)?;
+    push_activity(app, format!("schema {}", key_name));
+    Ok(())
+}
+
+fn push_activity(app: &mut App, msg: String) {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let h = (secs / 3600) % 24;
+    let m = (secs / 60) % 60;
+    app.activity.push(crate::tui::ActivityLine {
+        time: format!("{:02}:{:02}", h, m),
+        message: msg,
+    });
+    if app.activity.len() > 100 {
+        app.activity.remove(0);
+    }
+}
+
+pub fn collect_env_pairs() -> Result<Vec<(String, String)>> {
+    let vault_path = Path::new(VAULT_FILENAME);
+
+    if vault_path.exists() {
+        let account = identity::DEFAULT_ACCOUNT;
+        if !identity::exists(account) {
+            anyhow::bail!("vault exists but no identity in keyring; run `senv init`");
+        }
+        let id = identity::load(account)?;
+        let vault = vault_file::read(vault_path)?;
+        if !vault_file::verify_mac(&vault) {
+            anyhow::bail!("vault integrity check failed (BLAKE3 MAC mismatch)");
+        }
+        let mut pairs = Vec::with_capacity(vault.secrets.len());
+        for (key, entry) in &vault.secrets {
+            if entry.shared.is_empty() {
+                continue;
+            }
+            let pt = vault_file::decrypt_value(&entry.shared, &id)
+                .with_context(|| format!("decrypt {}", key))?;
+            pairs.push((key.clone(), pt));
+        }
+        Ok(pairs)
+    } else if Path::new(".env").exists() {
+        let rows = import_env_file(Path::new(".env"))?;
+        let mut pairs = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let Some(secret) = row.shared {
+                let v: &str = secret.expose_secret();
+                pairs.push((row.key, v.to_string()));
+            }
+        }
+        Ok(pairs)
+    } else {
+        anyhow::bail!("no .env.age or .env found in cwd")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,10 +645,7 @@ mod tests {
             scoped: None,
             missing_in_example: false,
         }];
-        mark_missing_against_example(
-            &mut rows,
-            Path::new("/nonexistent/path/.env.example"),
-        );
+        mark_missing_against_example(&mut rows, Path::new("/nonexistent/path/.env.example"));
         assert_eq!(rows.len(), 1);
     }
 
@@ -596,78 +661,5 @@ mod tests {
         assert_eq!(k1.1, "value1".len());
         let k2 = preview.entries.iter().find(|(k, _)| k == "KEY2").unwrap();
         assert_eq!(k2.1, "longer_value_2".len());
-    }
-}
-
-pub fn commit_schema_edit(app: &mut App) -> Result<()> {
-    let key_name = app
-        .edit_key_name
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("no key being edited"))?;
-    let new_desc = app.edit_buffer.lines().join("\n").trim().to_string();
-
-    if new_desc.is_empty() {
-        app.schema.remove(&key_name);
-    } else {
-        app.schema.insert(key_name.clone(), new_desc);
-    }
-
-    save_app_rows_to_vault(app)?;
-    push_activity(app, format!("schema {}", key_name));
-    Ok(())
-}
-
-fn push_activity(app: &mut App, msg: String) {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let h = (secs / 3600) % 24;
-    let m = (secs / 60) % 60;
-    app.activity.push(crate::tui::ActivityLine {
-        time: format!("{:02}:{:02}", h, m),
-        message: msg,
-    });
-    if app.activity.len() > 100 {
-        app.activity.remove(0);
-    }
-}
-
-pub fn collect_env_pairs() -> Result<Vec<(String, String)>> {
-    let vault_path = Path::new(VAULT_FILENAME);
-
-    if vault_path.exists() {
-        let account = identity::DEFAULT_ACCOUNT;
-        if !identity::exists(account) {
-            anyhow::bail!("vault exists but no identity in keyring; run `senv init`");
-        }
-        let id = identity::load(account)?;
-        let vault = vault_file::read(vault_path)?;
-        if !vault_file::verify_mac(&vault) {
-            anyhow::bail!("vault integrity check failed (BLAKE3 MAC mismatch)");
-        }
-        let mut pairs = Vec::with_capacity(vault.secrets.len());
-        for (key, entry) in &vault.secrets {
-            if entry.shared.is_empty() {
-                continue;
-            }
-            let pt = vault_file::decrypt_value(&entry.shared, &id)
-                .with_context(|| format!("decrypt {}", key))?;
-            pairs.push((key.clone(), pt));
-        }
-        Ok(pairs)
-    } else if Path::new(".env").exists() {
-        let rows = import_env_file(Path::new(".env"))?;
-        let mut pairs = Vec::with_capacity(rows.len());
-        for row in rows {
-            if let Some(secret) = row.shared {
-                let v: &str = secret.expose_secret();
-                pairs.push((row.key, v.to_string()));
-            }
-        }
-        Ok(pairs)
-    } else {
-        anyhow::bail!("no .env.age or .env found in cwd")
     }
 }
