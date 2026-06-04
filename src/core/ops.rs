@@ -42,6 +42,17 @@ pub fn init() -> Result<()> {
 }
 
 pub fn import(path: &Path) -> Result<()> {
+    let count = import_silent(path)?;
+    println!(
+        "✓ Encrypted {} entries from {} into {}",
+        count,
+        path.display(),
+        VAULT_FILENAME
+    );
+    Ok(())
+}
+
+pub fn import_silent(path: &Path) -> Result<usize> {
     let rows = import_env_file(path)?;
 
     let account = identity::DEFAULT_ACCOUNT;
@@ -76,14 +87,29 @@ pub fn import(path: &Path) -> Result<()> {
 
     vault.mac = vault_file::compute_mac(&vault);
     vault_file::write(vault_path, &vault)?;
+    Ok(count)
+}
 
-    println!(
-        "✓ Encrypted {} entries from {} into {}",
-        count,
-        path.display(),
-        vault_path.display()
-    );
-    Ok(())
+pub fn build_import_preview(path: &Path) -> Result<crate::tui::ImportPreview> {
+    let rows = import_env_file(path)?;
+    let entries: Vec<(String, usize)> = rows
+        .iter()
+        .map(|r| {
+            let len = r
+                .shared
+                .as_ref()
+                .map(|s| {
+                    let exposed: &str = s.expose_secret();
+                    exposed.len()
+                })
+                .unwrap_or(0);
+            (r.key.clone(), len)
+        })
+        .collect();
+    Ok(crate::tui::ImportPreview {
+        source: path.to_path_buf(),
+        entries,
+    })
 }
 
 pub fn import_env_file(path: &Path) -> Result<Vec<SecretRow>> {
