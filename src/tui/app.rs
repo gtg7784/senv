@@ -1,7 +1,8 @@
 use ratatui::{
     prelude::*,
     widgets::{
-        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
+        Block, Borders, Cell, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Row,
+        Table, TableState,
     },
 };
 use secrecy::{ExposeSecret, SecretString};
@@ -315,8 +316,11 @@ impl App {
             let table = Table::new(rows, widths)
                 .header(header)
                 .block(Block::default().borders(Borders::ALL).title(title))
-                .row_highlight_style(Style::new().bg(Color::DarkGray))
-                .highlight_symbol("▸ ");
+                .row_highlight_style(
+                    Style::new().bg(Color::Cyan).fg(Color::Black).bold(),
+                )
+                .highlight_symbol("▶ ")
+                .highlight_spacing(HighlightSpacing::Always);
             f.render_stateful_widget(table, area, &mut self.row_state);
         }
     }
@@ -423,8 +427,8 @@ impl App {
 
         f.render_stateful_widget(
             List::new(items)
-                .highlight_style(Style::new().bg(Color::DarkGray))
-                .highlight_symbol("▸ "),
+                .highlight_style(Style::new().bg(Color::Cyan).fg(Color::Black).bold())
+                .highlight_symbol("▶ "),
             inner,
             &mut self.diff_state,
         );
@@ -495,8 +499,8 @@ impl App {
             .collect();
         f.render_stateful_widget(
             List::new(items)
-                .highlight_style(Style::new().bg(Color::DarkGray))
-                .highlight_symbol("▸ "),
+                .highlight_style(Style::new().bg(Color::Cyan).fg(Color::Black).bold())
+                .highlight_symbol("▶ "),
             chunks[0],
             &mut self.recipients_state,
         );
