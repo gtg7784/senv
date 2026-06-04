@@ -4,6 +4,8 @@
 
 **Status**: 🚀 Alpha / functional. All six TUI modals, the CLI exec wrapper, age encryption, OS keyring identity, and multi-recipient sharing are wired end-to-end. 24 unit tests pass.
 
+> **User manuals**: [English](docs/USAGE.md) · [한국어](docs/사용법.md) · [日本語](docs/使い方.md) · [中文](docs/使用说明.md)
+
 ## Why senv?
 
 Existing tools split into four camps that don't compose:
