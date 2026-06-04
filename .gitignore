@@ -1,0 +1,15 @@
+/target
+**/*.rs.bk
+.DS_Store
+
+# senv runtime artifacts (NEVER commit plaintext)
+*.env
+!*.env.example
+*.env.age.tmp
+.senv-allow
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
