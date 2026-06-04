@@ -11,6 +11,14 @@ pub fn populate(app: &mut App) -> Result<()> {
     }
     app.git_remote = git_remote_url();
 
+    let vault_path = Path::new(crate::storage::VAULT_FILENAME);
+    let identity_account = crate::crypto::identity::DEFAULT_ACCOUNT;
+    if vault_path.exists() && crate::crypto::identity::exists(identity_account) {
+        if crate::crypto::identity::unlock(app).is_ok() {
+            return Ok(());
+        }
+    }
+
     if let Ok(rows) = crate::core::ops::import_env_file(Path::new(".env")) {
         app.rows = rows;
         crate::core::ops::mark_missing_against_example(&mut app.rows, Path::new(".env.example"));
