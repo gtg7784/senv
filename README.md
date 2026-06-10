@@ -67,6 +67,19 @@ flowchart TB
 | `storage/` | atomic file I/O, BLAKE3 MAC, symlink rejection | murk |
 | `inject/` | `Command::env` spawn, `eval $(senv export)` | dotenvage + envchain |
 
+## Install
+
+```bash
+brew install gtg7784/senv/senv
+```
+
+Or tap first:
+
+```bash
+brew tap gtg7784/senv
+brew install senv
+```
+
 ## Build
 
 ```bash
